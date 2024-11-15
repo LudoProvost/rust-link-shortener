@@ -11,6 +11,8 @@ use rand::{distributions::Alphanumeric, Rng};
 use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
 #[derive(Clone)]
@@ -30,7 +32,7 @@ async fn main() {
         .route("/:shortened", get(get_short_link))
         .with_state(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
     let tcp = TcpListener::bind(&addr).await.unwrap();
 
     axum::serve(tcp, router).await.unwrap();
@@ -51,94 +53,19 @@ fn generate_rand_code(length: u32) -> String {
         .collect()
 }
 
-async fn root_handler() -> Html<&'static str> {
-    Html(
-        r#"<!DOCTYPE html>
-            <html lang="en">
-            <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Request Code App</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                margin: 20px;
-            }
-            .container {
-                display: flex;
-                margin-bottom: 20px;
-                align-items: center;
-            }
-            .input-box {
-                margin-right: 10px;
-            }
-            button {
-                margin-left: 5px;
-            }
-            .response {
-                margin-left: 10px;
-                width: 200px; /* Adjust width as needed */
-            }
-        </style>
-    </head>
-    <body>
-        <h1>Request Code App</h1>
+async fn root_handler() -> Html<String> {
+    println!("root.\n");
+    let mut file = match File::open("static/index.html").await {
+        Ok(f) => f,
+        Err(_) => return Html("Error loading page".to_string()),
+    };
 
-        <div class="container">
-            <input type="text" id="input1" class="input-box" placeholder="Enter link">
-            <button id="button1">Get Code</button>
-            <input type="text" id="response1" class="response" placeholder="Response will appear here" readonly>
-        </div>
+    let mut contents = String::new();
+    if let Err(_) = file.read_to_string(&mut contents).await {
+        return Html("Error reading file".to_string());
+    }
 
-        <div class="container">
-            <input type="text" id="input2" class="input-box" placeholder="Enter code">
-            <button id="button2">Send Code</button>
-            <input type="text" id="response2" class="response" placeholder="Response will appear here" readonly>
-        </div>
-
-        <script>
-            // Function to handle the first button click
-            document.getElementById('button1').addEventListener('click', function () {
-                const input1 = document.getElementById('input1').value;
-                fetch('http://localhost:8000/link', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ link: input1 }) // Send input value in the request body
-                })
-                .then(response => response.json())
-                .then(data => {
-                    // Assuming the response has a 'code' field
-                    document.getElementById('response1').value = data.code || 'No code received';
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    document.getElementById('response1').value = 'Error fetching code';
-                });
-            });
-
-            // Function to handle the second button click
-            document.getElementById('button2').addEventListener('click', function () {
-                const input2 = document.getElementById('input2').value;
-                fetch(`http://localhost:8000/${input2}`, {
-                    method: 'GET' // Assuming a GET request to fetch the code
-                })
-                .then(response => response.json())
-                .then(data => {
-                    // Assuming the response has a 'code' field
-                    document.getElementById('response2').value = data.code || 'No code received';
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    document.getElementById('response2').value = 'Error fetching code';
-                });
-            });
-        </script>
-    </body>
-    </html>
-    "#,
-    )
+    Html(contents)
 }
 
 // return shortened link
@@ -147,7 +74,7 @@ async fn post_link(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
 ) -> Response {
-    println!("hi");
+    println!("shortening link.\n");
 
     let code = generate_rand_code(4);
 
@@ -167,6 +94,7 @@ async fn post_link(
 
 // redirects the user to the link associated with the shortened link
 async fn get_short_link(State(state): State<AppState>, Path(shortened): Path<String>) -> Response {
+    println!("redirecting.\n");
     let arr_lock = state.arr.lock();
 
     match arr_lock {
